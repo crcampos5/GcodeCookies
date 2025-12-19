@@ -1,110 +1,143 @@
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsTextItem, QGraphicsLineItem
-from PySide6.QtGui import QPen, QColor, QPainter, QFont, QTransform
-from PySide6.QtCore import Qt
+"""
+gui/canvas.py
+Lienzo con soporte para múltiples objetos DXF seleccionables.
+Mantiene tus configuraciones de márgenes y fuente.
+"""
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene
+from PySide6.QtGui import (QPen, QColor, QPainter, QFont, QTransform, 
+                           QWheelEvent, QMouseEvent, QCursor)
+from PySide6.QtCore import Qt, QPoint, Signal
+
+# Importamos la nueva clase de objeto gráfico
+from gui.dxf_item import DXFGraphicsItem
 
 class ViewerCanvas(QGraphicsView):
+    # Señal que emite el objeto seleccionado (o None)
+    item_selected = Signal(object)
+
     def __init__(self):
         super().__init__()
         
-        # Crear la escena
         self.scene = QGraphicsScene()
         self.setScene(self.scene)
         
-        # --- 1. CONFIGURACIÓN VISUAL ---
+        # --- Configuración Visual ---
         self.setRenderHint(QPainter.Antialiasing)
-        self.scale(1, -1)  # Invertir Y (Coordenadas CAD)
-        self.setBackgroundBrush(QColor(255, 255, 255)) # Fondo Blanco
+        self.setBackgroundBrush(QColor(255, 255, 255))
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        # Definir el tamaño de la "Cama" o Área de trabajo
-        self.work_area_size = 200 # 200mm x 200mm
-        
-        # Ajustar la vista inicial con un margen para ver las reglas
-        # (x, y, w, h) -> Le damos 20mm de margen a cada lado
-        self.setSceneRect(-30, -30, self.work_area_size + 60, self.work_area_size + 60)
+        # --- Navegación ---
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setDragMode(QGraphicsView.NoDrag) # Manual
 
-        # Lápiz para el dibujo del usuario (Ahora Negro para contraste)
+        # Variables Paneo
+        self._panning = False
+        self._last_mouse_pos = QPoint()
+
+        # Área de trabajo y TUS MÁRGENES
+        self.work_area_size = 200 
+        self.setSceneRect(-30, -10, self.work_area_size + 50, self.work_area_size + 10)
+
         self.pen_geometry = QPen(QColor(0, 0, 0)) 
-        self.pen_geometry.setWidth(1) # Grosor visual de 1px (Cosmetic)
+        self.pen_geometry.setWidth(1)
 
-        # Dibujar la grilla inicial
+        self.first_show = True
         self.draw_grid()
+        self.scale(1, -1)
+
+        # CONECTAR SELECCIÓN: Cuando la escena detecta un clic en un item
+        self.scene.selectionChanged.connect(self.on_selection_changed)
+
+    def add_dxf_object(self, paths_list):
+        """Crea un nuevo DXFGraphicsItem y lo suma a la escena"""
+        item = DXFGraphicsItem(paths_list)
+        self.scene.addItem(item)
+        
+        # Seleccionar automáticamente el nuevo objeto
+        self.scene.clearSelection()
+        item.setSelected(True)
+
+    def on_selection_changed(self):
+        """Avisa a la ventana principal qué objeto se seleccionó"""
+        items = self.scene.selectedItems()
+        if items:
+            self.item_selected.emit(items[0])
+        else:
+            self.item_selected.emit(None)
+
+    # --- Eventos (Igual que tu versión) ---
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.first_show:
+            self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
+            if self.transform().m22() > 0: self.scale(1, -1)
+            self.first_show = False
+
+    def wheelEvent(self, event: QWheelEvent):
+        zoom = 1.15 if event.angleDelta().y() > 0 else 1/1.15
+        self.scale(zoom, zoom)
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MiddleButton:
+            self._panning = True
+            self._last_mouse_pos = event.pos()
+            self.setCursor(Qt.ClosedHandCursor)
+            event.accept()
+        else:
+            # Importante: Pasar el evento al padre para que funcione la selección (Clic Izq)
+            super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MiddleButton:
+            self._panning = False
+            self.setCursor(Qt.ArrowCursor)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self._panning:
+            delta = event.pos() - self._last_mouse_pos
+            self._last_mouse_pos = event.pos()
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
 
     def draw_grid(self):
-        """Dibuja el área de trabajo, la cuadrícula y las reglas"""
+        # MANTENIENDO TU ESTILO DE GRILLA
+        color_fine = QColor(240, 240, 240)
+        color_main = QColor(200, 200, 200)
+        color_axis = QColor(100, 100, 100)
         
-        # Colores de la interfaz
-        color_grid_fine = QColor(240, 240, 240)  # Gris muy claro (cada 10mm)
-        color_grid_main = QColor(200, 200, 200)  # Gris claro (cada 50mm)
-        color_axis = QColor(100, 100, 100)       # Gris oscuro (Borde)
-        
-        pen_fine = QPen(color_grid_fine)
-        pen_fine.setWidth(0)
-        
-        pen_main = QPen(color_grid_main)
-        pen_main.setWidth(0)
+        pen_fine = QPen(color_fine); pen_fine.setWidth(0)
+        pen_main = QPen(color_main); pen_main.setWidth(0)
+        rect_pen = QPen(color_axis); rect_pen.setWidth(1)
 
-        # 1. Dibujar el recuadro del área de trabajo (0,0) a (200,200)
-        # Usamos addRect(x, y, w, h, pen)
-        rect_pen = QPen(color_axis)
-        rect_pen.setWidth(2)
-        # Nota: QRect se dibuja hacia abajo si h es positivo, pero como tenemos scale(1, -1),
-        # el sistema de coordenadas es cartesiano.
         self.scene.addRect(0, 0, self.work_area_size, self.work_area_size, rect_pen)
 
-        # 2. Dibujar líneas de cuadrícula y números
-        font = QFont("Arial", 8)
-        
-        # Matriz para invertir el texto (ya que la vista está invertida)
+        font = QFont("Arial", 4) # TU FUENTE
         text_transform = QTransform().scale(1, -1)
-
-        step = 10 # Cuadrícula cada 10mm
+        step = 10 
         
         for i in range(0, self.work_area_size + 1, step):
-            # Determinar si es línea principal (cada 50mm) o secundaria
             is_main = (i % 50 == 0)
             current_pen = pen_main if is_main else pen_fine
             
-            # --- Líneas Verticales (Eje X) ---
             self.scene.addLine(i, 0, i, self.work_area_size, current_pen)
-            
-            # --- Líneas Horizontales (Eje Y) ---
             self.scene.addLine(0, i, self.work_area_size, i, current_pen)
 
-            # --- Números (Solo en líneas principales) ---
             if is_main:
-                # Etiqueta X (Abajo del eje)
                 text_x = self.scene.addText(str(i), font)
                 text_x.setTransform(text_transform)
-                # Ajustamos posición: x=i, y=-5 (un poco abajo del 0)
-                # El offset visual depende del tamaño de fuente, ajustamos a ojo
-                text_x.setPos(i - 10, -5) 
+                text_x.setPos(i - 10, 0) # TU POSICIÓN
                 text_x.setDefaultTextColor(QColor(80, 80, 80))
 
-                # Etiqueta Y (Izquierda del eje)
-                if i > 0: # Evitar superponer el 0,0
+                if i > 0:
                     text_y = self.scene.addText(str(i), font)
                     text_y.setTransform(text_transform)
-                    text_y.setPos(-25, i + 5)
+                    text_y.setPos(-15, i + 5) # TU POSICIÓN
                     text_y.setDefaultTextColor(QColor(80, 80, 80))
-
-    def draw_geometry(self, paths_list):
-        """Recibe geometría nueva, limpia la escena y redibuja todo"""
-        self.scene.clear()
-        
-        # Importante: Volver a dibujar la grilla porque clear() la borró
-        self.draw_grid()
-        
-        element_count = 0
-        for vertices in paths_list:
-            if len(vertices) < 2: continue
-            
-            # Dibujar segmentos
-            # Opción rápida: Usar QPainterPath sería más eficiente, 
-            # pero líneas individuales son fáciles de depurar.
-            for i in range(len(vertices) - 1):
-                p1 = vertices[i]
-                p2 = vertices[i+1]
-                self.scene.addLine(p1.x, p1.y, p2.x, p2.y, self.pen_geometry)
-            element_count += 1
-            
-        return element_count

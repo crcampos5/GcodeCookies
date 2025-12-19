@@ -1,106 +1,89 @@
-from PySide6.QtWidgets import (QMainWindow, QHBoxLayout, QVBoxLayout, QWidget, 
-                               QFileDialog, QMessageBox, QLabel, QFrame)
+from PySide6.QtWidgets import QMainWindow, QHBoxLayout, QVBoxLayout, QWidget, QFileDialog, QMessageBox, QLabel, QFrame
 from PySide6.QtCore import Qt
 
-# Importamos los 3 módulos
 from gui.canvas import ViewerCanvas
 from gui.control_panel import ControlPanel
-from gui.file_panel import FilePanel  # <--- Importamos el nuevo widget
-from core.dxf_processor import DXFProcessor
+from gui.file_panel import FilePanel
+from core.dxf_processor import DXFReader # <--- Usamos el nuevo Reader
+# (El DXFItem lo maneja el canvas internamente)
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        
-        self.setWindowTitle("CookieCNC - Editor Modular v2")
+        self.setWindowTitle("CookieCNC - Editor Multicapa")
         self.resize(1100, 750)
         
-        self.processor = DXFProcessor()
+        self.dxf_reader = DXFReader()
+        self.current_selected_item = None # Referencia al objeto actual
 
-        # Widget central
+        self.setup_ui()
+        self.setup_connections()
+
+    def setup_ui(self):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         self.main_layout = QHBoxLayout(main_widget)
 
-        # --- IZQUIERDA: LIENZO ---
+        # --- Lienzo ---
         self.canvas_container = QWidget()
-        canvas_layout = QVBoxLayout(self.canvas_container)
-        canvas_layout.setContentsMargins(0,0,0,0)
-        
-        self.lbl_info = QLabel("Bienvenido. Carga un DXF.")
-        self.lbl_info.setStyleSheet("padding: 5px; color: gray;")
+        l_canvas = QVBoxLayout(self.canvas_container)
+        l_canvas.setContentsMargins(0,0,0,0)
+        self.lbl_info = QLabel("Carga múltiples DXF. Selecciona con clic izquierdo para editar.")
         self.canvas = ViewerCanvas()
-        
-        canvas_layout.addWidget(self.lbl_info)
-        canvas_layout.addWidget(self.canvas)
-        
-        # --- DERECHA: BARRA LATERAL (Sidebar) ---
-        # Creamos un contenedor vertical para apilar los paneles
+        l_canvas.addWidget(self.lbl_info)
+        l_canvas.addWidget(self.canvas)
+
+        # --- Panel Lateral ---
         self.sidebar = QWidget()
         self.sidebar.setFixedWidth(280)
-        sidebar_layout = QVBoxLayout(self.sidebar)
-        sidebar_layout.setAlignment(Qt.AlignTop)
+        l_sidebar = QVBoxLayout(self.sidebar)
         
-        # 1. Panel de Archivos (Arriba)
         self.file_panel = FilePanel()
-        sidebar_layout.addWidget(self.file_panel)
+        self.control_panel = ControlPanel() # Inicia deshabilitado
         
-        # Separador visual (Línea horizontal)
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setFrameShadow(QFrame.Sunken)
-        sidebar_layout.addWidget(line)
-        
-        # 2. Panel de Control (Debajo)
-        self.control_panel = ControlPanel()
-        sidebar_layout.addWidget(self.control_panel)
-        
-        # Espaciador al final para empujar todo hacia arriba
-        sidebar_layout.addStretch()
+        l_sidebar.addWidget(self.file_panel)
+        l_sidebar.addWidget(self.control_panel)
+        l_sidebar.addStretch()
 
-        # Agregamos los contenedores al layout principal
         self.main_layout.addWidget(self.canvas_container, stretch=1)
         self.main_layout.addWidget(self.sidebar, stretch=0)
 
-        # --- CONEXIONES (WIRING) ---
-        
-        # Conexiones del FilePanel
+    def setup_connections(self):
+        # 1. Carga de archivos
         self.file_panel.signal_load.connect(self.action_load_file)
-        self.file_panel.signal_gcode.connect(self.action_generate_gcode)
         
-        # Conexiones del ControlPanel
-        self.control_panel.signal_move.connect(self.apply_move)
-        self.control_panel.signal_scale.connect(self.apply_scale)
-        self.control_panel.signal_rotate.connect(self.apply_rotate)
-
-    # --- LÓGICA ---
-
-    def refresh_canvas(self):
-        paths = self.processor.get_paths()
-        count = self.canvas.draw_geometry(paths)
-        self.lbl_info.setText(f"Vista previa: {count} trazos")
+        # 2. Selección en Canvas -> Actualizar Panel Derecho
+        self.canvas.item_selected.connect(self.on_item_selected)
+        
+        # 3. Cambio en Panel Derecho -> Actualizar Objeto en Canvas
+        self.control_panel.value_changed.connect(self.apply_transformations)
 
     def action_load_file(self):
-        filename, _ = QFileDialog.getOpenFileName(self, "Abrir DXF", "", "DXF Files (*.dxf)")
+        filename, _ = QFileDialog.getOpenFileName(self, "Importar DXF", "", "DXF (*.dxf)")
         if filename:
-            if self.processor.load_file(filename):
-                self.refresh_canvas()
-                self.file_panel.enable_gcode_button(True) # Activamos el botón en el otro panel
-                self.lbl_info.setText(f"Archivo: {filename}")
+            paths = self.dxf_reader.read(filename)
+            if paths:
+                # El Canvas crea el item gráfico y lo añade
+                self.canvas.add_dxf_object(paths)
+                self.lbl_info.setText(f"Añadido: {filename.split('/')[-1]}")
             else:
-                QMessageBox.critical(self, "Error", "No se pudo leer el archivo DXF.")
+                QMessageBox.critical(self, "Error", "DXF inválido.")
 
-    def apply_move(self, dx, dy):
-        self.processor.move(dx, dy)
-        self.refresh_canvas()
+    def on_item_selected(self, item):
+        """Llamado cuando el usuario hace clic en un objeto del canvas"""
+        self.current_selected_item = item
+        # Enviamos el item al panel para que lea sus valores (X, Y, Scale...)
+        self.control_panel.update_ui_from_item(item)
+        
+        if item:
+            self.lbl_info.setText("Objeto seleccionado. Modifica sus valores a la derecha.")
+        else:
+            self.lbl_info.setText("Ningún objeto seleccionado.")
 
-    def apply_scale(self, factor):
-        self.processor.scale(factor)
-        self.refresh_canvas()
-
-    def apply_rotate(self, angle):
-        self.processor.rotate(angle)
-        self.refresh_canvas()
-
-    def action_generate_gcode(self):
-        QMessageBox.information(self, "G-Code", "¡Generando G-Code... (Lógica pendiente)!")
+    def apply_transformations(self, x, y, scale, rotation):
+        """Llamado cuando el usuario mueve los spinbox"""
+        if self.current_selected_item:
+            # Aplicamos los valores directamente al item gráfico
+            self.current_selected_item.setPos(x, y)
+            self.current_selected_item.setScale(scale)
+            self.current_selected_item.setRotation(rotation)

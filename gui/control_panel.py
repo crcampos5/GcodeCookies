@@ -1,93 +1,75 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QGroupBox, 
-                               QDoubleSpinBox, QFormLayout)
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QGroupBox, QDoubleSpinBox, QFormLayout, QLabel
 from PySide6.QtCore import Qt, Signal
 
 class ControlPanel(QWidget):
-    # Señales solo de manipulación
-    signal_move = Signal(float, float)
-    signal_scale = Signal(float)
-    signal_rotate = Signal(float)
+    # Señales de cambio
+    value_changed = Signal(float, float, float, float) # x, y, scale, rotation
 
     def __init__(self):
         super().__init__()
+        self.block_signals = False # Para evitar bucles infinitos al actualizar UI
         self.setup_ui()
+        self.setEnabled(False) # Deshabilitado hasta que se seleccione algo
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignTop)
 
-        # --- SECCIÓN 1: MOVER ---
-        group_move = QGroupBox("Mover (mm)")
-        layout_move = QFormLayout()
-        
-        self.spin_x = QDoubleSpinBox()
-        self.spin_x.setRange(-500, 500)
-        self.spin_x.setSuffix(" mm")
-        
-        self.spin_y = QDoubleSpinBox()
-        self.spin_y.setRange(-500, 500)
-        self.spin_y.setSuffix(" mm")
-        
-        btn_move = QPushButton("Aplicar Traslación")
-        btn_move.clicked.connect(self.on_move_clicked)
-        
-        layout_move.addRow("X:", self.spin_x)
-        layout_move.addRow("Y:", self.spin_y)
-        layout_move.addWidget(btn_move)
-        group_move.setLayout(layout_move)
-        layout.addWidget(group_move)
+        # --- Posición ---
+        group_pos = QGroupBox("Posición (mm)")
+        form_pos = QFormLayout()
+        self.spin_x = self._create_spin(-500, 500)
+        self.spin_y = self._create_spin(-500, 500)
+        form_pos.addRow("X:", self.spin_x)
+        form_pos.addRow("Y:", self.spin_y)
+        group_pos.setLayout(form_pos)
+        layout.addWidget(group_pos)
 
-        # --- SECCIÓN 2: ESCALAR ---
-        group_scale = QGroupBox("Escalar")
-        layout_scale = QVBoxLayout()
-        
-        self.spin_scale = QDoubleSpinBox()
-        self.spin_scale.setRange(0.1, 10.0)
-        self.spin_scale.setSingleStep(0.1)
-        self.spin_scale.setValue(1.0)
-        self.spin_scale.setPrefix("x ")
-        
-        btn_scale = QPushButton("Aplicar Escala")
-        btn_scale.clicked.connect(self.on_scale_clicked)
-        
-        layout_scale.addWidget(self.spin_scale)
-        layout_scale.addWidget(btn_scale)
-        group_scale.setLayout(layout_scale)
+        # --- Escala ---
+        group_scale = QGroupBox("Escala")
+        v_scale = QVBoxLayout()
+        self.spin_scale = self._create_spin(0.1, 10.0, step=0.1)
+        v_scale.addWidget(self.spin_scale)
+        group_scale.setLayout(v_scale)
         layout.addWidget(group_scale)
 
-        # --- SECCIÓN 3: ROTAR ---
-        group_rot = QGroupBox("Rotar")
-        layout_rot = QVBoxLayout()
-        
-        self.spin_rot = QDoubleSpinBox()
-        self.spin_rot.setRange(-360, 360)
-        self.spin_rot.setSuffix(" °")
-        
-        btn_rot = QPushButton("Rotar")
-        btn_rot.clicked.connect(self.on_rotate_clicked)
-        
-        layout_rot.addWidget(self.spin_rot)
-        layout_rot.addWidget(btn_rot)
-        group_rot.setLayout(layout_rot)
+        # --- Rotación ---
+        group_rot = QGroupBox("Rotación (°)")
+        v_rot = QVBoxLayout()
+        self.spin_rot = self._create_spin(-360, 360)
+        v_rot.addWidget(self.spin_rot)
+        group_rot.setLayout(v_rot)
         layout.addWidget(group_rot)
 
-    def on_move_clicked(self):
-        dx = self.spin_x.value()
-        dy = self.spin_y.value()
-        if dx != 0 or dy != 0:
-            self.signal_move.emit(dx, dy)
-            self.spin_x.setValue(0)
-            self.spin_y.setValue(0)
+    def _create_spin(self, min_val, max_val, step=1.0):
+        s = QDoubleSpinBox()
+        s.setRange(min_val, max_val)
+        s.setSingleStep(step)
+        s.valueChanged.connect(self.emit_changes)
+        return s
 
-    def on_scale_clicked(self):
-        factor = self.spin_scale.value()
-        if factor != 1.0:
-            self.signal_scale.emit(factor)
-            self.spin_scale.setValue(1.0)
+    def update_ui_from_item(self, item):
+        """Actualiza los valores visuales basados en el objeto seleccionado"""
+        if item is None:
+            self.setEnabled(False)
+            return
 
-    def on_rotate_clicked(self):
-        angle = self.spin_rot.value()
-        if angle != 0:
-            self.signal_rotate.emit(angle)
-            self.spin_rot.setValue(0)
+        self.setEnabled(True)
+        self.block_signals = True # Pausar emisión mientras actualizamos UI
+        
+        self.spin_x.setValue(item.x())
+        self.spin_y.setValue(item.y())
+        self.spin_scale.setValue(item.scale())
+        self.spin_rot.setValue(item.rotation())
+        
+        self.block_signals = False
+
+    def emit_changes(self):
+        """Emitir los nuevos valores a la ventana principal"""
+        if not self.block_signals:
+            self.value_changed.emit(
+                self.spin_x.value(),
+                self.spin_y.value(),
+                self.spin_scale.value(),
+                self.spin_rot.value()
+            )
