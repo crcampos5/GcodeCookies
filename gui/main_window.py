@@ -7,6 +7,7 @@ from gui.file_panel import FilePanel
 from gui.gcode_panel import GCodePanel
 from gui.collapsible_box import CollapsibleBox  # <--- IMPORTACIÓN NUEVA
 from core.dxf_processor import DXFReader
+from core.transformer import TransformManager
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -15,7 +16,7 @@ class MainWindow(QMainWindow):
         self.resize(1100, 750)
         
         self.dxf_reader = DXFReader()
-        self.current_selected_item = None 
+        self.transformer = TransformManager()
 
         self.setup_ui()
         self.setup_connections()
@@ -93,7 +94,7 @@ class MainWindow(QMainWindow):
         self.file_panel.signal_load.connect(self.action_load_file)
         
         # Canvas -> Selección
-        self.canvas.item_selected.connect(self.on_item_selected)
+        self.canvas.items_selected.connect(self.on_items_selected)
         
         # Panel Control -> Transformación
         self.control_panel.value_changed.connect(self.apply_transformations)
@@ -114,26 +115,33 @@ class MainWindow(QMainWindow):
             else:
                 QMessageBox.critical(self, "Error", "DXF inválido.")
 
-    def on_item_selected(self, item):
-        self.current_selected_item = item
+    def on_items_selected(self, items):
+        """
+        Maneja la lógica de UI al seleccionar y pasa los datos al Transformer.
+        """
+        # 1. Pasar selección al gestor lógico
+        self.transformer.set_selection(items)
         
-        # Actualizamos paneles laterales
-        self.control_panel.update_ui_from_item(item)
-        self.gcode_panel.update_selection(item)
+        # 2. Actualizar UI (Panel Transformación)
+        self.control_panel.update_ui_from_selection(items)
         
-        if item:
+        # 3. Actualizar UI (Panel G-Code y Textos)
+        if len(items) == 1:
+            self.gcode_panel.update_selection(items[0])
+            self.gcode_panel.setEnabled(True)
             self.lbl_info.setText("Objeto seleccionado.")
-            # UX: Desplegar automáticamente el panel de control al seleccionar si está cerrado
             if not self.box_control.toggle_button.isChecked():
                 self.box_control.toggle_button.click()
         else:
-            self.lbl_info.setText("Ningún objeto seleccionado.")
+            self.gcode_panel.update_selection(None)
+            self.gcode_panel.setEnabled(False)
+            if len(items) > 1:
+                self.lbl_info.setText(f"{len(items)} objetos seleccionados. Rotación grupal activa.")
+            else:
+                self.lbl_info.setText("Ningún objeto seleccionado.")
 
     def apply_transformations(self, x, y, scale, rotation):
-        if self.current_selected_item:
-            self.current_selected_item.setPos(x, y)
-            self.current_selected_item.setScale(scale)
-            self.current_selected_item.setRotation(rotation)
+        self.transformer.apply(x, y, scale, rotation)
 
     def display_gcode_result(self, text):
         self.gcode_display.setText(text)

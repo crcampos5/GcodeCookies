@@ -16,30 +16,35 @@ class ControlPanel(QWidget):
         layout.setAlignment(Qt.AlignTop)
 
         # --- Posición ---
-        group_pos = QGroupBox("Posición (mm)")
+        self.group_pos = QGroupBox("Posición (mm)")
         form_pos = QFormLayout()
         self.spin_x = self._create_spin(-500, 500)
         self.spin_y = self._create_spin(-500, 500)
         form_pos.addRow("X:", self.spin_x)
         form_pos.addRow("Y:", self.spin_y)
-        group_pos.setLayout(form_pos)
-        layout.addWidget(group_pos)
+        self.group_pos.setLayout(form_pos)
+        layout.addWidget(self.group_pos)
 
         # --- Escala ---
-        group_scale = QGroupBox("Escala")
+        self.group_scale = QGroupBox("Escala")
         v_scale = QVBoxLayout()
         self.spin_scale = self._create_spin(0.1, 10.0, step=0.1)
         v_scale.addWidget(self.spin_scale)
-        group_scale.setLayout(v_scale)
-        layout.addWidget(group_scale)
+        self.group_scale.setLayout(v_scale)
+        layout.addWidget(self.group_scale)
 
         # --- Rotación ---
-        group_rot = QGroupBox("Rotación (°)")
+        self.group_rot = QGroupBox("Rotación (°)")
         v_rot = QVBoxLayout()
         self.spin_rot = self._create_spin(-360, 360)
         v_rot.addWidget(self.spin_rot)
-        group_rot.setLayout(v_rot)
-        layout.addWidget(group_rot)
+        self.group_rot.setLayout(v_rot)
+        layout.addWidget(self.group_rot)
+        
+        self.lbl_info = QLabel("")
+        self.lbl_info.setWordWrap(True)
+        self.lbl_info.setStyleSheet("color: gray; font-size: 11px; margin-top: 5px;")
+        layout.addWidget(self.lbl_info)
 
     def _create_spin(self, min_val, max_val, step=1.0):
         s = QDoubleSpinBox()
@@ -48,19 +53,47 @@ class ControlPanel(QWidget):
         s.valueChanged.connect(self.emit_changes)
         return s
 
-    def update_ui_from_item(self, item):
-        """Actualiza los valores visuales basados en el objeto seleccionado"""
-        if item is None:
-            self.setEnabled(False)
-            return
-
-        self.setEnabled(True)
-        self.block_signals = True # Pausar emisión mientras actualizamos UI
+    def update_ui_from_selection(self, items):
+        """
+        Lógica inteligente de activación según selección.
+        """
+        self.block_signals = True 
         
-        self.spin_x.setValue(item.x())
-        self.spin_y.setValue(item.y())
-        self.spin_scale.setValue(item.scale())
-        self.spin_rot.setValue(item.rotation())
+        if not items:
+            self.setEnabled(False)
+            self.lbl_info.setText("Selecciona un objeto.")
+            
+        elif len(items) == 1:
+            # --- MODO INDIVIDUAL ---
+            self.setEnabled(True)
+            self.group_pos.setEnabled(True)   # Posición habilitada
+            self.group_scale.setEnabled(True)
+            self.group_rot.setEnabled(True)
+            
+            item = items[0]
+            self.spin_x.setValue(item.x())
+            self.spin_y.setValue(item.y())
+            self.spin_scale.setValue(item.scale())
+            self.spin_rot.setValue(item.rotation())
+            self.lbl_info.setText("Edición individual.")
+            
+        else:
+            # --- MODO GRUPO ---
+            self.setEnabled(True)
+            self.group_pos.setEnabled(False)  # Posición DESHABILITADA (evita apilamiento)
+            self.group_scale.setEnabled(True)
+            self.group_rot.setEnabled(True)
+            
+            # Tomamos valores del primer objeto como referencia visual
+            first = items[0]
+            self.spin_scale.setValue(first.scale())
+            self.spin_rot.setValue(first.rotation())
+            
+            # Limpiamos valores de posición para no confundir
+            self.spin_x.setValue(0)
+            self.spin_y.setValue(0)
+            
+            self.lbl_info.setText(f"Editando {len(items)} objetos.\n(Posición bloqueada en grupo)")
         
         self.block_signals = False
 

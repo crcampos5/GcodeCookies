@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, QPoint, Signal
 from gui.dxf_item import DXFGraphicsItem
 
 class ViewerCanvas(QGraphicsView):
-    item_selected = Signal(object)
+    items_selected = Signal(list)
 
     def __init__(self):
         super().__init__()
@@ -19,7 +19,7 @@ class ViewerCanvas(QGraphicsView):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
-        self.setDragMode(QGraphicsView.NoDrag)
+        self.setDragMode(QGraphicsView.RubberBandDrag)
 
         self._panning = False
         self._last_mouse_pos = QPoint()
@@ -64,8 +64,6 @@ class ViewerCanvas(QGraphicsView):
                 painter_path.moveTo(poly[0][0], poly[0][1])
                 for point in poly[1:]:
                     painter_path.lineTo(point[0], point[1])
-                # No cerramos el path con closeSubpath automáticamente porque
-                # el relleno es un camino continuo, no necesariamente polígonos cerrados visualmente
             
             # Crear item y añadir a escena
             item = QGraphicsPathItem(painter_path)
@@ -75,7 +73,6 @@ class ViewerCanvas(QGraphicsView):
             self.scene.addItem(item)
             self.preview_items.append(item)
 
-    # ... (Resto de métodos: draw_pins, add_dxf_object, eventos, etc. IGUAL QUE ANTES) ...
     def draw_pins(self):
         diameter = 3.175
         radius = diameter / 2
@@ -86,14 +83,26 @@ class ViewerCanvas(QGraphicsView):
             self.scene.addEllipse(cx-radius, cy-radius, diameter, diameter, pen, brush)
 
     def add_dxf_object(self, paths_list):
-        item = DXFGraphicsItem(paths_list)
-        self.scene.addItem(item)
+        """
+        Agrega los objetos del DXF a la escena.
+        MODIFICADO: Se crea un DXFGraphicsItem independiente por cada camino (entidad)
+        para permitir selección y manipulación individual.
+        """
         self.scene.clearSelection()
-        item.setSelected(True)
+        
+        for single_path in paths_list:
+            # DXFGraphicsItem espera una lista de caminos, así que pasamos una lista con un solo elemento.
+            # Al crearse, cada ítem calculará su propio centro (bounding box) y se posicionará correctamente
+            # en el espacio absoluto de la escena.
+            item = DXFGraphicsItem([single_path])
+            self.scene.addItem(item)
+            
+        # Nota: No seleccionamos nada automáticamente al cargar para no abrumar al usuario
+        # si el archivo contiene muchas líneas sueltas.
 
     def on_selection_changed(self):
         items = self.scene.selectedItems()
-        self.item_selected.emit(items[0] if items else None)
+        self.items_selected.emit(items)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -122,7 +131,7 @@ class ViewerCanvas(QGraphicsView):
             event.accept()
         else:
             super().mouseReleaseEvent(event)
-            self.on_selection_changed()
+            #self.on_selection_changed()
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self._panning:
@@ -135,7 +144,6 @@ class ViewerCanvas(QGraphicsView):
             super().mouseMoveEvent(event)
 
     def draw_grid(self):
-        # (Tu código de grilla original)
         color_fine = QColor(240, 240, 240)
         color_main = QColor(200, 200, 200)
         color_axis = QColor(100, 100, 100)
