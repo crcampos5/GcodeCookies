@@ -1,11 +1,11 @@
 from PySide6.QtWidgets import (QMainWindow, QHBoxLayout, QVBoxLayout, QWidget, 
                                QFileDialog, QMessageBox, QLabel, QTabWidget, QTextEdit)
-from PySide6.QtCore import Qt
 
 from gui.canvas import ViewerCanvas
 from gui.control_panel import ControlPanel
 from gui.file_panel import FilePanel
 from gui.gcode_panel import GCodePanel
+from gui.collapsible_box import CollapsibleBox  # <--- IMPORTACIÓN NUEVA
 from core.dxf_processor import DXFReader
 
 class MainWindow(QMainWindow):
@@ -59,17 +59,30 @@ class MainWindow(QMainWindow):
 
         # --- B. BARRA LATERAL (FIJA) ---
         self.sidebar = QWidget()
-        self.sidebar.setFixedWidth(280)
+        self.sidebar.setFixedWidth(300) 
         l_sidebar = QVBoxLayout(self.sidebar)
+        l_sidebar.setContentsMargins(5, 5, 5, 5)
         
+        # 1. Panel de Archivo (Siempre visible)
         self.file_panel = FilePanel()
-        self.control_panel = ControlPanel()
-        self.gcode_panel = GCodePanel() # Panel pequeño con botón
-        
         l_sidebar.addWidget(self.file_panel)
-        l_sidebar.addWidget(self.control_panel)
-        l_sidebar.addWidget(self.gcode_panel)
-        l_sidebar.addStretch()
+        
+        l_sidebar.addSpacing(10)
+
+        # 2. Panel de Control (DESPLEGABLE)
+        self.control_panel = ControlPanel()
+        # Envolvemos el panel en nuestra caja colapsable
+        self.box_control = CollapsibleBox("Transformación", self.control_panel)
+        l_sidebar.addWidget(self.box_control)
+        
+        l_sidebar.addSpacing(5)
+
+        # 3. Panel G-Code (DESPLEGABLE)
+        self.gcode_panel = GCodePanel()
+        self.box_gcode = CollapsibleBox("Configuración G-Code", self.gcode_panel)
+        l_sidebar.addWidget(self.box_gcode)
+
+        l_sidebar.addStretch() # Empuja todo hacia arriba
 
         # Agregar al layout principal
         self.main_layout.addWidget(self.tabs, stretch=1)
@@ -85,8 +98,10 @@ class MainWindow(QMainWindow):
         # Panel Control -> Transformación
         self.control_panel.value_changed.connect(self.apply_transformations)
         
-        # Panel GCode -> Visor (CONEXIÓN CLAVE)
+        # Panel GCode -> Visor
         self.gcode_panel.gcode_generated.connect(self.display_gcode_result)
+
+        self.gcode_panel.operations_changed.connect(self.update_canvas_preview)
 
     def action_load_file(self):
         filename, _ = QFileDialog.getOpenFileName(self, "Importar DXF", "", "DXF (*.dxf)")
@@ -95,7 +110,6 @@ class MainWindow(QMainWindow):
             if paths:
                 self.canvas.add_dxf_object(paths)
                 self.lbl_info.setText(f"Añadido: {filename.split('/')[-1]}")
-                # Cambiar a pestaña de diseño automáticamente al cargar
                 self.tabs.setCurrentIndex(0)
             else:
                 QMessageBox.critical(self, "Error", "DXF inválido.")
@@ -109,6 +123,9 @@ class MainWindow(QMainWindow):
         
         if item:
             self.lbl_info.setText("Objeto seleccionado.")
+            # UX: Desplegar automáticamente el panel de control al seleccionar si está cerrado
+            if not self.box_control.toggle_button.isChecked():
+                self.box_control.toggle_button.click()
         else:
             self.lbl_info.setText("Ningún objeto seleccionado.")
 
@@ -119,7 +136,14 @@ class MainWindow(QMainWindow):
             self.current_selected_item.setRotation(rotation)
 
     def display_gcode_result(self, text):
-        """Recibe el texto del panel derecho y lo muestra en la pestaña central"""
         self.gcode_display.setText(text)
-        # Cambiar automáticamente a la pestaña del visor para ver el resultado
         self.tabs.setCurrentIndex(1)
+        self.file_panel.enable_gcode_button(True)
+
+    def update_canvas_preview(self):
+        """Pide al generador los caminos calculados y se los manda al canvas"""
+        # 1. Obtener datos de geometría (rutas de relleno o borde)
+        preview_data = self.gcode_panel.generator.get_all_preview_paths()
+        
+        # 2. Mandarlos a pintar
+        self.canvas.draw_preview_paths(preview_data)
