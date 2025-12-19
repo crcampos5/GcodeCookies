@@ -1,0 +1,30 @@
+# --- Python (Archivos compilados y temporales) ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Entornos Virtuales (CRUCIAL) ---
+# Nunca debemos subir las librerías al repo, cada quien las instala.
+env/
+venv/
+.venv/
+lib/
+site-packages/
+
+# --- IDEs y Editores (Configuraciones personales) ---
+.vscode/
+.idea/
+*.swp
+
+# --- Archivos del Sistema Operativo ---
+.DS_Store
+Thumbs.db
+
+# --- Archivos Generados por tu programa ---
+# Ignoramos los archivos de salida para no llenar el historial de pruebas
+*.gcode
+*.nc
+*.tap
+
+# --- Logs y Debug ---
+*.log
