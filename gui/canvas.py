@@ -1,14 +1,13 @@
 """
 gui/canvas.py
-Lienzo con soporte para múltiples objetos DXF seleccionables.
-Mantiene tus configuraciones de márgenes y fuente.
+Lienzo con soporte para múltiples objetos DXF y PUNTILLAS DE REFERENCIA.
 """
 from PySide6.QtWidgets import QGraphicsView, QGraphicsScene
 from PySide6.QtGui import (QPen, QColor, QPainter, QFont, QTransform, 
-                           QWheelEvent, QMouseEvent, QCursor)
+                           QWheelEvent, QMouseEvent, QCursor, QBrush) # <--- Agregado QBrush
 from PySide6.QtCore import Qt, QPoint, Signal
 
-# Importamos la nueva clase de objeto gráfico
+# Importamos la clase de objeto gráfico
 from gui.dxf_item import DXFGraphicsItem
 
 class ViewerCanvas(QGraphicsView):
@@ -36,19 +35,47 @@ class ViewerCanvas(QGraphicsView):
         self._panning = False
         self._last_mouse_pos = QPoint()
 
-        # Área de trabajo y TUS MÁRGENES
+        # Área de trabajo
         self.work_area_size = 200 
         self.setSceneRect(-30, -10, self.work_area_size + 50, self.work_area_size + 10)
 
-        self.pen_geometry = QPen(QColor(0, 0, 0)) 
-        self.pen_geometry.setWidth(1)
-
         self.first_show = True
+        
+        # --- DIBUJO DE ELEMENTOS DE FONDO ---
         self.draw_grid()
+        self.draw_pins() # <--- Dibujamos las puntillas fijas
+        
         self.scale(1, -1)
 
-        # CONECTAR SELECCIÓN: Cuando la escena detecta un clic en un item
+        # CONECTAR SELECCIÓN
         self.scene.selectionChanged.connect(self.on_selection_changed)
+
+    def draw_pins(self):
+        """
+        Dibuja las guías físicas (puntillas) donde se encaja la galleta.
+        Son elementos visuales fijos (no seleccionables).
+        """
+        diameter = 3.175
+        radius = diameter / 2
+        
+        # Coordenadas de los centros solicitados
+        pin_positions = [(85, 95), (150, 95)]
+        
+        # Estilo: Relleno verde, sin borde
+        brush = QBrush(QColor(0, 200, 50)) 
+        pen = QPen(Qt.NoPen)
+        
+        for center_x, center_y in pin_positions:
+            # addEllipse recibe (x_esquina, y_esquina, ancho, alto)
+            # Restamos el radio para que la coordenada sea el CENTRO del círculo
+            self.scene.addEllipse(
+                center_x - radius, 
+                center_y - radius, 
+                diameter, 
+                diameter, 
+                pen, 
+                brush
+            )
 
     def add_dxf_object(self, paths_list):
         """Crea un nuevo DXFGraphicsItem y lo suma a la escena"""
@@ -67,7 +94,7 @@ class ViewerCanvas(QGraphicsView):
         else:
             self.item_selected.emit(None)
 
-    # --- Eventos (Igual que tu versión) ---
+    # --- Eventos ---
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self.first_show:
@@ -86,7 +113,6 @@ class ViewerCanvas(QGraphicsView):
             self.setCursor(Qt.ClosedHandCursor)
             event.accept()
         else:
-            # Importante: Pasar el evento al padre para que funcione la selección (Clic Izq)
             super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
@@ -96,6 +122,8 @@ class ViewerCanvas(QGraphicsView):
             event.accept()
         else:
             super().mouseReleaseEvent(event)
+            # Forzamos actualización del panel al soltar el objeto tras arrastrarlo
+            self.on_selection_changed()
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self._panning:
@@ -108,7 +136,6 @@ class ViewerCanvas(QGraphicsView):
             super().mouseMoveEvent(event)
 
     def draw_grid(self):
-        # MANTENIENDO TU ESTILO DE GRILLA
         color_fine = QColor(240, 240, 240)
         color_main = QColor(200, 200, 200)
         color_axis = QColor(100, 100, 100)
@@ -119,7 +146,7 @@ class ViewerCanvas(QGraphicsView):
 
         self.scene.addRect(0, 0, self.work_area_size, self.work_area_size, rect_pen)
 
-        font = QFont("Arial", 4) # TU FUENTE
+        font = QFont("Arial", 4)
         text_transform = QTransform().scale(1, -1)
         step = 10 
         
@@ -133,11 +160,11 @@ class ViewerCanvas(QGraphicsView):
             if is_main:
                 text_x = self.scene.addText(str(i), font)
                 text_x.setTransform(text_transform)
-                text_x.setPos(i - 10, 0) # TU POSICIÓN
+                text_x.setPos(i - 10, 0)
                 text_x.setDefaultTextColor(QColor(80, 80, 80))
 
                 if i > 0:
                     text_y = self.scene.addText(str(i), font)
                     text_y.setTransform(text_transform)
-                    text_y.setPos(-15, i + 5) # TU POSICIÓN
+                    text_y.setPos(-15, i + 5)
                     text_y.setDefaultTextColor(QColor(80, 80, 80))
