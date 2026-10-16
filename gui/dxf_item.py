@@ -6,7 +6,7 @@ MODIFICADO: La geometría se centra en (0,0) local para que la rotación/escala
 sea desde el centro, y la posición corresponda al centro en la grilla.
 """
 from PySide6.QtWidgets import QGraphicsPathItem, QStyle
-from PySide6.QtGui import QPen, QColor, QPainterPath
+from PySide6.QtGui import QPen, QColor, QPainterPath, QPainterPathStroker
 from PySide6.QtCore import Qt
 
 class DXFGraphicsItem(QGraphicsPathItem):
@@ -53,6 +53,15 @@ class DXFGraphicsItem(QGraphicsPathItem):
         
         self.setPen(self.pen_normal)
 
+    def shape(self):
+        # Closed curves are selectable on their stroke, not their entire interior.
+        stroker = QPainterPathStroker()
+        stroker.setWidth(2.0)
+        return stroker.createStroke(self.path())
+
+    def boundingRect(self):
+        return self.path().boundingRect().adjusted(-1.0, -1.0, 1.0, 1.0)
+
     def paint(self, painter, option, widget=None):
         """
         Sobreescribimos el pintado para cambiar el lápiz según el estado.
@@ -69,6 +78,21 @@ class DXFGraphicsItem(QGraphicsPathItem):
         super().paint(painter, option, widget)
 
     def itemChange(self, change, value):
-        if change == QGraphicsPathItem.ItemSelectedChange:
-            pass 
+        if getattr(self, 'registration_locked', False):
+            unchanged = {
+                QGraphicsPathItem.ItemPositionChange: self.pos,
+                QGraphicsPathItem.ItemRotationChange: self.rotation,
+                QGraphicsPathItem.ItemScaleChange: self.scale,
+                QGraphicsPathItem.ItemTransformChange: self.transform,
+                QGraphicsPathItem.ItemTransformOriginPointChange: self.transformOriginPoint,
+            }
+            if change in unchanged:
+                return unchanged[change]()
+        if change in (QGraphicsPathItem.ItemPositionHasChanged,
+                      QGraphicsPathItem.ItemRotationHasChanged,
+                      QGraphicsPathItem.ItemScaleHasChanged,
+                      QGraphicsPathItem.ItemTransformHasChanged):
+            callback = getattr(self, 'geometry_changed', None)
+            if callback:
+                callback()
         return super().itemChange(change, value)

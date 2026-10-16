@@ -25,7 +25,7 @@ class FilePanel(QWidget):
         self.btn_load.clicked.connect(self.signal_load.emit)
         
         # Botón Guardar (inicia desactivado)
-        self.btn_gcode = QPushButton("💾 Generar G-Code")
+        self.btn_gcode = QPushButton("💾 Guardar CGC")
         self.btn_gcode.setMinimumHeight(35)
         self.btn_gcode.setEnabled(False)
         self.btn_gcode.setStyleSheet("background-color: #e1e1e1;") # Visualmente desactivado

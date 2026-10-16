@@ -1,3 +1,4 @@
+from shiboken6 import isValid
 from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPathItem
 from PySide6.QtGui import (QPen, QColor, QPainter, QFont, QTransform, 
                            QWheelEvent, QMouseEvent, QBrush, QPainterPath)
@@ -6,11 +7,13 @@ from gui.dxf_item import DXFGraphicsItem
 
 class ViewerCanvas(QGraphicsView):
     items_selected = Signal(list)
+    geometry_changed = Signal()
+    drag_finished = Signal()
 
     def __init__(self):
         super().__init__()
         
-        self.scene = QGraphicsScene()
+        self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
         
         self.setRenderHint(QPainter.Antialiasing)
@@ -29,10 +32,13 @@ class ViewerCanvas(QGraphicsView):
         
         self.draw_grid()
         self.draw_pins() 
-        self.scale(1, -1)
+        self.scale(3.2, -3.2)
         
         # --- Contenedor para las previsualizaciones ---
         self.preview_items = [] 
+        self.registration_items = []
+        self._registered_drag = None
+
 
         self.scene.selectionChanged.connect(self.on_selection_changed)
 
@@ -54,7 +60,7 @@ class ViewerCanvas(QGraphicsView):
             # Configurar Lápiz: Punteado, del color de la operación
             pen = QPen(QColor(color_hex))
             pen.setWidth(0) # 'Cosmetic' (siempre fino)
-            pen.setStyle(Qt.DotLine) # <--- LINEA PUNTEADA
+            pen.setStyle(Qt.DashLine) # <--- LINEA PUNTEADA
             
             # Crear el camino gráfico
             painter_path = QPainterPath()
@@ -68,10 +74,18 @@ class ViewerCanvas(QGraphicsView):
             # Crear item y añadir a escena
             item = QGraphicsPathItem(painter_path)
             item.setPen(pen)
+            item.setAcceptedMouseButtons(Qt.NoButton)
             item.setZValue(10) # Asegurar que se pinte ENCIMA del DXF original (Z=0)
             
             self.scene.addItem(item)
             self.preview_items.append(item)
+            for x, y in op_data.get('scan_points', []):
+                for dx, dy in ((1.5, 0), (0, 1.5)):
+                    marker = self.scene.addLine(x-dx, y-dy, x+dx, y+dy, QPen(QColor('#0066ff'), 0))
+                    marker.setAcceptedMouseButtons(Qt.NoButton)
+                    marker.setZValue(20)
+                    marker.setToolTip("Punto de escaneo láser del relleno")
+                    self.preview_items.append(marker)
 
     def draw_pins(self):
         diameter = 3.175
@@ -89,6 +103,7 @@ class ViewerCanvas(QGraphicsView):
         para permitir selección y manipulación individual.
         """
         self.scene.clearSelection()
+        added = []
         
         for single_path in paths_list:
             # DXFGraphicsItem espera una lista de caminos, así que pasamos una lista con un solo elemento.
@@ -96,13 +111,48 @@ class ViewerCanvas(QGraphicsView):
             # en el espacio absoluto de la escena.
             item = DXFGraphicsItem([single_path])
             self.scene.addItem(item)
+            item.geometry_changed = self.geometry_changed.emit
+            added.append(item)
+        return added
             
         # Nota: No seleccionamos nada automáticamente al cargar para no abrumar al usuario
         # si el archivo contiene muchas líneas sueltas.
 
     def on_selection_changed(self):
+        if not isValid(self.scene):
+            return
         items = self.scene.selectedItems()
         self.items_selected.emit(items)
+
+    def show_registration(self, registration):
+        for item in self.registration_items:
+            self.scene.removeItem(item)
+        self.registration_items.clear()
+        if not registration:
+            return
+        from PySide6.QtCore import QPointF
+        from PySide6.QtGui import QPolygonF
+        for shape in registration['shapes']:
+            polygon = QPolygonF([QPointF(*p) for p in shape['points']])
+            item = self.scene.addPolygon(polygon, QPen(Qt.NoPen), QBrush(QColor(shape['color'])))
+            item.setZValue(30)
+            item.setAcceptedMouseButtons(Qt.NoButton)
+            self.registration_items.append(item)
+        corners = registration['metadata']['corners_design_mm']
+        outline = QPainterPath(QPointF(*corners[0]))
+        for p in corners[1:]:
+            outline.lineTo(*p)
+        outline.closeSubpath()
+        frame = self.scene.addPath(outline, QPen(QColor('#0088cc'), 0))
+        frame.setZValue(31)
+        frame.setAcceptedMouseButtons(Qt.NoButton)
+        self.registration_items.append(frame)
+        # Corner zero identifies marker orientation without selectable geometry.
+        x,y = corners[0]
+        dot = self.scene.addEllipse(x-.2,y-.2,.4,.4,QPen(Qt.NoPen),QBrush(QColor('#0088cc')))
+        dot.setZValue(32)
+        dot.setAcceptedMouseButtons(Qt.NoButton)
+        self.registration_items.append(dot)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -111,11 +161,43 @@ class ViewerCanvas(QGraphicsView):
             if self.transform().m22() > 0: self.scale(1, -1)
             self.first_show = False
 
+    def keyPressEvent(self, event):
+        directions = {Qt.Key_Left: (-1, 0), Qt.Key_Right: (1, 0),
+                      Qt.Key_Up: (0, 1), Qt.Key_Down: (0, -1)}
+        if event.key() in directions and not (event.modifiers() & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)):
+            selected = [item for item in self.scene.selectedItems() if isinstance(item, DXFGraphicsItem)]
+            if selected:
+                step = 0.1 if event.modifiers() & Qt.ShiftModifier else 1.0
+                dx, dy = directions[event.key()]
+                if any(getattr(i,'registration_locked',False) for i in selected):
+                    move = getattr(self,'move_registered_group',None)
+                    if move and move(dx*step,dy*step):
+                        self.drag_finished.emit()
+                        self.on_selection_changed()
+                    event.accept()
+                    return
+                for item in selected:
+                    item.moveBy(dx * step, dy * step)
+                self.drag_finished.emit()
+                self.on_selection_changed()  # Refresh position controls without changing selection.
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
     def wheelEvent(self, event: QWheelEvent):
         zoom = 1.15 if event.angleDelta().y() > 0 else 1/1.15
         self.scale(zoom, zoom)
 
     def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.LeftButton and event.modifiers() == Qt.NoModifier:
+            selected = [i for i in self.scene.selectedItems() if isinstance(i,DXFGraphicsItem)]
+            all_items = [i for i in self.scene.items() if isinstance(i,DXFGraphicsItem)]
+            if selected and len(selected)==len(all_items) and all(getattr(i,'registration_locked',False) for i in selected):
+                point = self.mapToScene(event.pos())
+                if any(i.contains(i.mapFromScene(point)) for i in selected):
+                    self._registered_drag = point
+                    event.accept()
+                    return
         if event.button() == Qt.MiddleButton:
             self._panning = True
             self._last_mouse_pos = event.pos()
@@ -125,15 +207,28 @@ class ViewerCanvas(QGraphicsView):
             super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
+        if event.button() == Qt.LeftButton and self._registered_drag is not None:
+            self._registered_drag = None
+            self.drag_finished.emit()
+            event.accept()
+            return
         if event.button() == Qt.MiddleButton:
             self._panning = False
             self.setCursor(Qt.ArrowCursor)
             event.accept()
         else:
             super().mouseReleaseEvent(event)
-            #self.on_selection_changed()
+            if event.button() == Qt.LeftButton:
+                self.drag_finished.emit()
 
     def mouseMoveEvent(self, event: QMouseEvent):
+        if self._registered_drag is not None:
+            point = self.mapToScene(event.pos())
+            delta = point-self._registered_drag
+            self.move_registered_group(delta.x(),delta.y())
+            self._registered_drag = point
+            event.accept()
+            return
         if self._panning:
             delta = event.pos() - self._last_mouse_pos
             self._last_mouse_pos = event.pos()

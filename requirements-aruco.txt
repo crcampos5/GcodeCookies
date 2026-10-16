@@ -1,0 +1,2 @@
+# Headless OpenCV: image processing only; the application GUI uses PySide6.
+opencv-python-headless>=4.7,<5
