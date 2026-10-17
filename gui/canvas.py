@@ -4,6 +4,7 @@ from PySide6.QtGui import (QPen, QColor, QPainter, QFont, QTransform,
                            QWheelEvent, QMouseEvent, QBrush, QPainterPath)
 from PySide6.QtCore import Qt, QPoint, Signal
 from gui.dxf_item import DXFGraphicsItem
+from core.worktable import default_worktable, validate_worktable, WORK_AREA_SIZE
 
 class ViewerCanvas(QGraphicsView):
     items_selected = Signal(list)
@@ -26,12 +27,12 @@ class ViewerCanvas(QGraphicsView):
 
         self._panning = False
         self._last_mouse_pos = QPoint()
-        self.work_area_size = 200 
+        self.work_area_size = WORK_AREA_SIZE
         self.setSceneRect(-30, -10, self.work_area_size + 50, self.work_area_size + 10)
         self.first_show = True
         
-        self.draw_grid()
-        self.draw_pins() 
+        self.guide_items = []
+        self.set_worktable(default_worktable())
         self.scale(3.2, -3.2)
         
         # --- Contenedor para las previsualizaciones ---
@@ -90,11 +91,31 @@ class ViewerCanvas(QGraphicsView):
     def draw_pins(self):
         diameter = 3.175
         radius = diameter / 2
-        pin_positions = [(85, 95), (150, 95)]
+        pin_positions = self.worktable['pins']
         brush = QBrush(QColor(0, 200, 50)) 
         pen = QPen(Qt.NoPen)
         for cx, cy in pin_positions:
             self.scene.addEllipse(cx-radius, cy-radius, diameter, diameter, pen, brush)
+
+    def set_worktable(self, settings):
+        self.worktable = validate_worktable(settings)
+        for item in self.guide_items:
+            self.scene.removeItem(item)
+        before = set(self.scene.items())
+        self.draw_grid();self.draw_pins()
+        x,y = self.worktable['origin']
+        color=QColor('#c04430')
+        self.scene.addLine(x-3,y,x+3,y,QPen(color,0))
+        self.scene.addLine(x,y-3,x,y+3,QPen(color,0))
+        label=self.scene.addText('Origen (0,0)',QFont('Arial',4))
+        label.setTransform(QTransform().scale(1,-1));label.setPos(x+3,y+3);label.setDefaultTextColor(color)
+        self.guide_items = [i for i in self.scene.items() if i not in before]
+        for item in self.guide_items:
+            item.setAcceptedMouseButtons(Qt.NoButton)
+            item.setZValue(-10)
+        for px,py in [self.worktable['origin'],*self.worktable['pins']]:
+            from PySide6.QtCore import QRectF
+            self.setSceneRect(self.sceneRect().united(QRectF(px-10,py-10,20,20)))
 
     def add_dxf_object(self, paths_list):
         """
@@ -255,12 +276,12 @@ class ViewerCanvas(QGraphicsView):
             self.scene.addLine(i, 0, i, self.work_area_size, current_pen)
             self.scene.addLine(0, i, self.work_area_size, i, current_pen)
             if is_main:
-                text_x = self.scene.addText(str(i), font)
+                text_x = self.scene.addText(f"{i-self.worktable['origin'][0]:g}", font)
                 text_x.setTransform(text_transform)
                 text_x.setPos(i - 10, 0)
                 text_x.setDefaultTextColor(QColor(80, 80, 80))
                 if i > 0:
-                    text_y = self.scene.addText(str(i), font)
+                    text_y = self.scene.addText(f"{i-self.worktable['origin'][1]:g}", font)
                     text_y.setTransform(text_transform)
                     text_y.setPos(-15, i + 5)
                     text_y.setDefaultTextColor(QColor(80, 80, 80))

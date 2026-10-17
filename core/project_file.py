@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QGraphicsScene
 from gui.dxf_item import DXFGraphicsItem
 from core.gcode_generator import GCodeGenerator
 from core.aruco_registration import validate_metadata
+from core.worktable import default_worktable, validate_worktable
 
 
 def number(value):
@@ -61,8 +62,9 @@ def encode_project(window):
         if 'scan_points_local' in op:
             entry['scan_points_local']=op['scan_points_local']
         operations.append(entry)
-    data=dict(format='gcodecookies-project',version=1,design_name=g.design_name,
-              settings=dict(fill_overlap=g.fill_overlap,simplification_tolerance=g.simplification_tolerance),
+    data=dict(format='gcodecookies-project',version=2,design_name=g.design_name,
+              settings=dict(fill_overlap=g.fill_overlap,simplification_tolerance=g.simplification_tolerance,
+                            worktable=validate_worktable(g.worktable)),
               items=records,operations=operations,registration=copy.deepcopy(g.registration),
               registration_geometry={item_id(i):g.registration_geometry[i] for i in items if i in g.registration_geometry})
     return json.dumps(data,ensure_ascii=False,allow_nan=False,indent=2).encode('utf-8')
@@ -97,12 +99,13 @@ def read_project(filename):
 
 
 def decode_project(data):
-    if not isinstance(data,dict) or data.get('format')!='gcodecookies-project' or type(data.get('version')) is not int or data['version']!=1:
+    if not isinstance(data,dict) or data.get('format')!='gcodecookies-project' or type(data.get('version')) is not int or data['version'] not in (1,2):
         raise ValueError('Formato o versión de proyecto no compatible. Selecciona un archivo .gcookies.')
     # Build off-screen first. A malformed project must not erase the current work.
     scene=QGraphicsScene();items={};g=GCodeGenerator()
     if not isinstance(data['design_name'],str):raise ValueError('Nombre de proyecto inválido.')
     g.design_name=data['design_name']
+    g.worktable=validate_worktable(data['settings']['worktable']) if data['version']==2 else default_worktable()
     g.fill_overlap=number(data['settings']['fill_overlap'])
     g.simplification_tolerance=number(data['settings']['simplification_tolerance'])
     if not 0<=g.fill_overlap<1 or g.simplification_tolerance<0:

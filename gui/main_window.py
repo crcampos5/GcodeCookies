@@ -79,6 +79,9 @@ class MainWindow(QMainWindow):
         from gui.project_actions import ProjectActions
         self.project_actions = ProjectActions(self)
         self.setup_edit_actions()
+        self.configuration_action = QAction('Configuración',self)
+        self.menuBar().addAction(self.configuration_action)
+        self.configuration_action.triggered.connect(self.configure_worktable)
         self.canvas.drag_finished.connect(lambda: self.history.commit("Mover elementos"))
         self.gcode_panel.operations_changed.connect(lambda: self.history.commit("Editar operaciones"))
 
@@ -168,6 +171,23 @@ class MainWindow(QMainWindow):
         self.sidebar_scroll.setWidget(self.sidebar)
         self.sidebar_scroll.setFixedWidth(330)
         self.main_layout.addWidget(self.sidebar_scroll, stretch=0)
+
+    def configure_worktable(self):
+        from gui.worktable_dialog import WorktableDialog
+        dialog=WorktableDialog(self.gcode_panel.generator.worktable,self)
+        if dialog.exec()==WorktableDialog.DialogCode.Accepted:
+            self.apply_worktable(dialog.settings())
+
+    def apply_worktable(self, settings):
+        from core.worktable import validate_worktable
+        settings=validate_worktable(settings)
+        if settings==self.gcode_panel.generator.worktable:
+            return
+        self.gcode_panel.generator.worktable=settings
+        self.canvas.set_worktable(settings)
+        self.history.commit('Configurar topes y origen')
+        self.update_canvas_preview()
+        self.statusBar().showMessage('Topes y origen actualizados.',5000)
 
     def setup_connections(self):
         # Carga

@@ -74,6 +74,7 @@ class ProjectActions:
             panel=w.gcode_panel
             panel.cancel_editing();panel.reset_operation_form()
             panel.generator=generator
+            w.canvas.set_worktable(generator.worktable)
             panel.refresh_list()
             w.on_items_selected([])
             w.update_canvas_preview()

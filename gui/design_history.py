@@ -2,6 +2,7 @@
 from PySide6.QtGui import QUndoCommand, QUndoStack
 from PySide6.QtCore import Qt
 from gui.dxf_item import DXFGraphicsItem
+import copy
 
 
 class DesignCommand(QUndoCommand):
@@ -36,13 +37,14 @@ class DesignHistory:
                     operations=[dict(op) for op in w.gcode_panel.generator.operations],
                     registration=w.gcode_panel.generator.registration,
                     registration_geometry=dict(w.gcode_panel.generator.registration_geometry),
+                    worktable=copy.deepcopy(w.gcode_panel.generator.worktable),
                     name=w.gcode_panel.generator.design_name)
 
     def commit(self, label):
         if self.restoring:
             return
         after = self.capture()
-        if any(after[key] != self.last[key] for key in ('items', 'operations', 'name', 'registration')):
+        if any(after[key] != self.last[key] for key in ('items', 'operations', 'name', 'registration','worktable')):
             self.stack.push(DesignCommand(self, self.last, after, label))
             self.last = after
 
@@ -85,6 +87,8 @@ class DesignHistory:
             panel.generator.design_name = state['name']
             panel.generator.registration = state['registration']
             panel.generator.registration_geometry = dict(state['registration_geometry'])
+            panel.generator.worktable = copy.deepcopy(state['worktable'])
+            w.canvas.set_worktable(panel.generator.worktable)
             w.sync_registration_ui()
             panel.refresh_list()
             w.preview_timer.stop()

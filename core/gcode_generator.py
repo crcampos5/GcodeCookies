@@ -4,6 +4,7 @@ import math
 import re
 import copy
 from core.aruco_registration import validate_metadata
+from core.worktable import default_worktable, validate_worktable
 try:
     from shapely.geometry import Polygon, Point, LineString
     from shapely.ops import substring
@@ -20,6 +21,7 @@ class GCodeGenerator:
         self.simplification_tolerance = 0.05
         self.registration = None
         self.registration_geometry = {}
+        self.worktable = default_worktable()
 
     @staticmethod
     def item_geometry(item):
@@ -298,12 +300,17 @@ class GCodeGenerator:
 
     def generate_full_code(self):
         injectors, blocks = self._prepare()
+        ox,oy = validate_worktable(self.worktable)['origin']
+        def output_xy(point):
+            return [round(point[0]-ox,3),round(point[1]-oy,3)]
         header = dict(version='1.0', design_name=self.design_name.strip(), total_colors=len(injectors),
-                      way_travel='todo', centro=self._calculate_center())
+                      way_travel='todo', centro=output_xy(self._calculate_center()))
         if self.registration:
             header['version'] = '1.1'
             header['required_features'] = ['aruco_xy_v1']
             header['alignment'] = copy.deepcopy(self.registration['metadata'])
+            header['alignment']['corners_design_mm'] = [
+                [p[0]-ox,p[1]-oy] for p in header['alignment']['corners_design_mm']]
         lines = ['; --- HEADER START ---']
         lines.extend('; '+line for line in json.dumps(header, ensure_ascii=False, indent=2).splitlines())
         lines.extend(['; --- HEADER END ---', '; --- DEFINITIONS ---'])
@@ -314,11 +321,12 @@ class GCodeGenerator:
             lines.extend([f'; CHANGE_INJECTOR ID={block["injector"]}',
                           f'; OPERATION TYPE={block["type"]} NAME="{block["name"]}"'])
             for x, y in block['scan_points']:
+                x,y = output_xy((x,y))
                 lines.append(f'; SCAN_POINT X{x:.3f} Y{y:.3f}')
             feed = 800.0 if block['type'] == 'LINE' else 1000.0
             for path in block['paths']:
-                x, y = path[0]
+                x, y = output_xy(path[0])
                 lines.extend([f'G0 X{x:.3f} Y{y:.3f} Z0.000', 'G1 Z-1.000 F250.0'])
-                lines.extend(f'G1 X{x:.3f} Y{y:.3f} F{feed:.1f}' for x, y in path[1:])
+                lines.extend(f'G1 X{x:.3f} Y{y:.3f} F{feed:.1f}' for x, y in map(output_xy,path[1:]))
                 lines.append('G0 Z0.000')
         return '\n'.join(lines)+'\n'
