@@ -94,8 +94,10 @@ class ViewerCanvas(QGraphicsView):
         pin_positions = self.worktable['pins']
         brush = QBrush(QColor(0, 200, 50)) 
         pen = QPen(Qt.NoPen)
-        for cx, cy in pin_positions:
-            self.scene.addEllipse(cx-radius, cy-radius, diameter, diameter, pen, brush)
+        ox,oy=self.worktable['origin']
+        for index,(cx, cy) in enumerate(pin_positions,1):
+            item=self.scene.addEllipse(cx-radius, cy-radius, diameter, diameter, pen, brush)
+            item.setToolTip(f'Tope {index}: X {cx-ox:g}, Y {cy-oy:g} mm')
 
     def set_worktable(self, settings):
         self.worktable = validate_worktable(settings)
@@ -108,7 +110,9 @@ class ViewerCanvas(QGraphicsView):
         self.scene.addLine(x-3,y,x+3,y,QPen(color,0))
         self.scene.addLine(x,y-3,x,y+3,QPen(color,0))
         label=self.scene.addText('Origen (0,0)',QFont('Arial',4))
-        label.setTransform(QTransform().scale(1,-1));label.setPos(x+3,y+3);label.setDefaultTextColor(color)
+        label.setTransform(QTransform().scale(1,-1))
+        label.setPos(x+3 if x==0 else x-label.boundingRect().width()-3,y+9 if y==0 else y-3)
+        label.setDefaultTextColor(color)
         self.guide_items = [i for i in self.scene.items() if i not in before]
         for item in self.guide_items:
             item.setAcceptedMouseButtons(Qt.NoButton)
@@ -270,6 +274,7 @@ class ViewerCanvas(QGraphicsView):
         font = QFont("Arial", 4)
         text_transform = QTransform().scale(1, -1)
         step = 10 
+        ox,oy=self.worktable['origin']
         for i in range(0, self.work_area_size + 1, step):
             is_main = (i % 50 == 0)
             current_pen = pen_main if is_main else pen_fine
@@ -278,10 +283,10 @@ class ViewerCanvas(QGraphicsView):
             if is_main:
                 text_x = self.scene.addText(f"{i-self.worktable['origin'][0]:g}", font)
                 text_x.setTransform(text_transform)
-                text_x.setPos(i - 10, 0)
+                text_x.setPos(i-text_x.boundingRect().width()/2, -2 if oy==0 else self.work_area_size+8)
                 text_x.setDefaultTextColor(QColor(80, 80, 80))
-                if i > 0:
+                if i != oy:
                     text_y = self.scene.addText(f"{i-self.worktable['origin'][1]:g}", font)
                     text_y.setTransform(text_transform)
-                    text_y.setPos(-15, i + 5)
+                    text_y.setPos(-text_y.boundingRect().width()-2 if ox==0 else self.work_area_size+2, i+3)
                     text_y.setDefaultTextColor(QColor(80, 80, 80))

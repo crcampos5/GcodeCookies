@@ -70,6 +70,12 @@ class MainWindow(QMainWindow):
         self.preview_timer.timeout.connect(self.update_canvas_preview)
         self.canvas.geometry_changed.connect(self.on_geometry_changed)
         self.canvas.move_registered_group = self.move_registered_group
+        from core.machine_profiles import MachineProfiles
+        try:
+            self.gcode_panel.generator.worktable = MachineProfiles().initial_settings()
+            self.canvas.set_worktable(self.gcode_panel.generator.worktable)
+        except (ValueError, TypeError, OSError) as exc:
+            QMessageBox.warning(self, 'Configuración de máquinas', str(exc))
         self.history = DesignHistory(self)
         from gui.scan_point_editor import ScanPointEditor
         self.scan_editor = ScanPointEditor(self)
